@@ -126,9 +126,9 @@ reg_model = Regularizer()
 icnn_model = ICNN()
 iwcnn_model = IWCNN()
 
-reg_model = train_with_prox(reg_model, X, X_noisy, alpha=0.1, epochs=100, lr=1e-3, model_name='NN')
-icnn_model = train_with_prox(icnn_model, X, X_noisy, alpha=0.1, epochs=100, lr=1e-3, model_name='ICNN')
-iwcnn_model = train_with_prox(iwcnn_model, X, X_noisy, alpha=0.1, epochs=100, lr=1e-3, model_name='IWCNN')
+reg_model = train_with_prox(reg_model, X, X_noisy, alpha=0.1, epochs=500, lr=1e-2, model_name='NN')
+icnn_model = train_with_prox(icnn_model, X, X_noisy, alpha=0.1, epochs=500, lr=1e-2, model_name='ICNN')
+iwcnn_model = train_with_prox(iwcnn_model, X, X_noisy, alpha=0.1, epochs=1000, lr=1e-2, model_name='IWCNN')
 
 # Visualization
 x_min, x_max = X[:,0].min()-1, X[:,0].max()+1

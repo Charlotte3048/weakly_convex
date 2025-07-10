@@ -78,7 +78,7 @@ This approach allows differentiability through the prox steps, enabling end-to-e
 ### 4.3 Optimisation Method
 
 * Optimiser: Adam
-* Learning rate: typically $1 \times 10^{-3}$
+* Learning rate: typically $1 \times 10^{-2}$
 * Proximal operator steps: 10 unrolled gradient steps with fixed step size
 
 ### 4.4 Loss Function and Metrics
@@ -104,7 +104,6 @@ This approach allows differentiability through the prox steps, enabling end-to-e
   * Loss curves: total loss and MSE.
   * Model names: 'NN', 'ICNN', 'IWCNN'.
   * Hyperparameters: $\alpha$, learning rate, epochs.
-  * Optional: weight histograms and gradient tracking.
 
 ## 6. Visualisation
 ![Swiss Roll Regularisation Comparison](swiss_roll_result.png)
@@ -122,4 +121,3 @@ This approach allows differentiability through the prox steps, enabling end-to-e
 
 ---
 
-This document serves as a concise technical reference for current work and ongoing discussion.
