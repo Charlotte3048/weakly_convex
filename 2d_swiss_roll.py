@@ -59,7 +59,7 @@ def train_with_prox(model, X_clean, X_noisy, alpha=0.1, epochs=100, lr=1e-3, mod
     }, reinit=True)
 
     optimizer = optim.Adam(model.parameters(), lr=lr)
-    # scheduler = CosineAnnealingLR(optimizer, T_max=epochs)  # cosine annealing scheduler
+    scheduler = CosineAnnealingLR(optimizer, T_max=epochs)  # cosine annealing scheduler
 
     for epoch in range(epochs):
         optimizer.zero_grad()
@@ -90,6 +90,12 @@ def train_with_prox(model, X_clean, X_noisy, alpha=0.1, epochs=100, lr=1e-3, mod
     wandb.finish()
     return model
 
+def initialize_weights(module, nonlinearity='relu'):
+    for m in module.modules():
+        if isinstance(m, nn.Linear):
+            nn.init.xavier_uniform_(m.weight, gain=nn.init.calculate_gain(nonlinearity))
+            if m.bias is not None:
+                nn.init.zeros_(m.bias)
 
 # Define Models
 class NN(nn.Module):
@@ -97,20 +103,19 @@ class NN(nn.Module):
         super(NN, self).__init__()
         self.network = nn.Sequential(
             nn.Linear(input_dim, hidden_dim),
-            nn.ReLU(),
+            nn.SiLU(),
             nn.Linear(hidden_dim, hidden_dim),
-            nn.ReLU(),
+            nn.SiLU(),
+            nn.Dropout(0.1),
             nn.Linear(hidden_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.ReLU(),
+            nn.SiLU(),
             nn.Linear(hidden_dim, 1)
         )
-
-        # initialize_weights(self, nonlinearity='relu')
+        #initialize_weights(self, nonlinearity='silu')
 
     def forward(self, x):
         return self.network(x)
+
 
 
 class ICNN(nn.Module):
@@ -161,22 +166,22 @@ class IWCNN(nn.Module):
 
         self.smooth = nn.Sequential(
             nn.Linear(input_dim, hidden_dim),
-            nn.LeakyReLU(0.01),
+            nn.LeakyReLU(0.05),
             nn.Linear(hidden_dim, hidden_dim),
-            nn.LeakyReLU(0.01),
+            nn.LeakyReLU(0.05),
             nn.Linear(hidden_dim, hidden_dim),
-            nn.LeakyReLU(0.01),
+            nn.LeakyReLU(0.05),
             nn.Linear(hidden_dim, hidden_dim),
-            nn.LeakyReLU(0.01),
+            nn.LeakyReLU(0.05),
             nn.Linear(hidden_dim, hidden_dim),
         )
 
         # Convex network (ICNN)
         self.icnn = nn.Sequential(
             nn.Linear(hidden_dim, hidden_dim),
-            nn.LeakyReLU(0.01),
+            nn.LeakyReLU(0.05),
             nn.Linear(hidden_dim, hidden_dim),
-            nn.LeakyReLU(0.01),
+            nn.LeakyReLU(0.05),
             nn.Linear(hidden_dim, 1)
         )
 
@@ -202,9 +207,9 @@ nn_model = NN()
 icnn_model = ICNN()
 iwcnn_model = IWCNN()
 
-reg_model = train_with_prox(nn_model, X, X_noisy, alpha=0.1, epochs=0, lr=1e-2, model_name='NN')
-icnn_model = train_with_prox(icnn_model, X, X_noisy, alpha=0.1, epochs=0, lr=1e-2, model_name='ICNN')
-iwcnn_model = train_with_prox(iwcnn_model, X, X_noisy, alpha=0.1, epochs=100, lr=1e-2, model_name='IWCNN')
+reg_model = train_with_prox(nn_model, X, X_noisy, alpha=0.1, epochs=100, lr=1e-2, model_name='NN')
+icnn_model = train_with_prox(icnn_model, X, X_noisy, alpha=0.1, epochs=100, lr=1e-2, model_name='ICNN')
+iwcnn_model = train_with_prox(iwcnn_model, X, X_noisy, alpha=0.1, epochs=150, lr=1e-2, model_name='IWCNN')
 
 # Visualization
 x_min, x_max = X[:, 0].min() - 1, X[:, 0].max() + 1
