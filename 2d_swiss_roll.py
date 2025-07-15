@@ -8,6 +8,7 @@ import matplotlib.pyplot as plt
 from scipy.ndimage import gaussian_filter
 from sklearn.neighbors import NearestNeighbors
 from torch.optim.lr_scheduler import CosineAnnealingLR
+import torch.nn.functional as F
 
 # Set seeds
 np.random.seed(42)
@@ -91,39 +92,66 @@ def train_with_prox(model, X_clean, X_noisy, alpha=0.1, epochs=100, lr=1e-3, mod
 
 
 # Define Models
-class Regularizer(nn.Module):
-    def __init__(self, input_dim=2, hidden_dim=64):
-        super().__init__()
-        self.fc1 = nn.Linear(input_dim, hidden_dim)
-        self.fc2 = nn.Linear(hidden_dim, hidden_dim)
-        self.fc3 = nn.Linear(hidden_dim, 1)
-        self.act = nn.ReLU()
+class NN(nn.Module):
+    def __init__(self, input_dim=2, hidden_dim=128):
+        super(NN, self).__init__()
+        self.network = nn.Sequential(
+            nn.Linear(input_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, 1)
+        )
+
+        # initialize_weights(self, nonlinearity='relu')
 
     def forward(self, x):
-        out = self.act(self.fc1(x))
-        out = self.act(self.fc2(out))
-        out = self.fc3(out)
-        return out
+        return self.network(x)
 
 
 class ICNN(nn.Module):
-    def __init__(self, input_dim=2, hidden_dim=64):
+    def __init__(self, input_dim=2, hidden_dim=128):
         super(ICNN, self).__init__()
-        self.fc1 = nn.Linear(input_dim, hidden_dim, bias=False)
-        self.fc2 = nn.Linear(hidden_dim, hidden_dim, bias=False)
-        self.fc3 = nn.Linear(hidden_dim, 1, bias=False)
-        self.act = nn.ReLU()
-        for layer in [self.fc1, self.fc2, self.fc3]:
-            nn.init.uniform_(layer.weight, a=0.01, b=0.1)
+
+        # The first layer input to hidden layer
+        self.input_layer = nn.Linear(input_dim, hidden_dim)
+
+        # Hidden convex layer
+        self.hidden_layers = nn.ModuleList([
+            nn.Linear(hidden_dim, hidden_dim, bias=False) for _ in range(2)
+        ])
+
+        # Input skip connections with bias
+        self.input_skips = nn.ModuleList([
+            nn.Linear(input_dim, hidden_dim) for _ in range(2)
+        ])
+
+        # Output layer
+        self.output_layer = nn.Linear(hidden_dim, 1, bias=False)
+        self.output_skip = nn.Linear(input_dim, 1, bias=True)
+
+        self.activation = nn.ReLU()
+
+        self._initialize_weights()
 
     def forward(self, x):
-        self.fc1.weight.data.clamp_(min=0)
-        self.fc2.weight.data.clamp_(min=0)
-        self.fc3.weight.data.clamp_(min=0)
-        out = self.act(self.fc1(x))
-        out = self.act(self.fc2(out))
-        out = self.fc3(out)
-        return out
+        z = self.activation(self.input_layer(x))
+        for Wz, Wx in zip(self.hidden_layers, self.input_skips):
+            Wz.weight.data.clamp_(min=0)
+            z = self.activation(Wz(z) + Wx(x))
+
+        self.output_layer.weight.data.clamp_(min=0)
+        return self.output_layer(z) + self.output_skip(x)
+
+    # Xavier initialization for weights
+    def _initialize_weights(self):
+        for m in self.modules():
+            if isinstance(m, nn.Linear):
+                nn.init.xavier_uniform_(m.weight)
 
 
 class IWCNN(nn.Module):
@@ -170,13 +198,13 @@ class IWCNN(nn.Module):
 
 
 # Train All Models
-reg_model = Regularizer()
+nn_model = NN()
 icnn_model = ICNN()
 iwcnn_model = IWCNN()
 
-reg_model = train_with_prox(reg_model, X, X_noisy, alpha=0.1, epochs=150, lr=1e-2, model_name='NN')
-icnn_model = train_with_prox(icnn_model, X, X_noisy, alpha=0.1, epochs=100, lr=1e-2, model_name='ICNN')
-iwcnn_model = train_with_prox(iwcnn_model, X, X_noisy, alpha=0.1, epochs=150, lr=1e-2, model_name='IWCNN')
+reg_model = train_with_prox(nn_model, X, X_noisy, alpha=0.1, epochs=0, lr=1e-2, model_name='NN')
+icnn_model = train_with_prox(icnn_model, X, X_noisy, alpha=0.1, epochs=0, lr=1e-2, model_name='ICNN')
+iwcnn_model = train_with_prox(iwcnn_model, X, X_noisy, alpha=0.1, epochs=100, lr=1e-2, model_name='IWCNN')
 
 # Visualization
 x_min, x_max = X[:, 0].min() - 1, X[:, 0].max() + 1
@@ -193,22 +221,22 @@ icnn_pred = icnn_model(grid).detach().numpy().reshape(xx.shape)
 iwcnn_pred = iwcnn_model(grid).detach().numpy().reshape(xx.shape)
 
 fig, axs = plt.subplots(2, 2, figsize=(16, 10))
-cf0 = axs[0, 0].contourf(xx, yy, gaussian_filter(dist_true, sigma=1), levels=10, cmap='Pastel1')
+cf0 = axs[0, 0].contourf(xx, yy, gaussian_filter(dist_true, sigma=1), levels=10, cmap='RdBu_r')
 axs[0, 0].scatter(X[:, 0], X[:, 1], c='red', s=5)
 axs[0, 0].set_title('True Manifold')
 plt.colorbar(cf0, ax=axs[0, 0])
 
-cf1 = axs[0, 1].contourf(xx, yy, gaussian_filter(reg_pred, sigma=1), levels=10, cmap='Pastel1')
+cf1 = axs[0, 1].contourf(xx, yy, gaussian_filter(reg_pred, sigma=1), levels=10, cmap='RdBu_r')
 axs[0, 1].scatter(X[:, 0], X[:, 1], c='red', s=5)
 axs[0, 1].set_title('NN Prox')
 plt.colorbar(cf1, ax=axs[0, 1])
 
-cf2 = axs[1, 0].contourf(xx, yy, gaussian_filter(icnn_pred, sigma=1), levels=10, cmap='Pastel1')
+cf2 = axs[1, 0].contourf(xx, yy, gaussian_filter(icnn_pred, sigma=1), levels=10, cmap='RdBu_r')
 axs[1, 0].scatter(X[:, 0], X[:, 1], c='red', s=5)
 axs[1, 0].set_title('ICNN Prox')
 plt.colorbar(cf2, ax=axs[1, 0])
 
-cf3 = axs[1, 1].contourf(xx, yy, gaussian_filter(iwcnn_pred, sigma=1), levels=10, cmap='Pastel1')
+cf3 = axs[1, 1].contourf(xx, yy, gaussian_filter(iwcnn_pred, sigma=1), levels=10, cmap='RdBu_r')
 axs[1, 1].scatter(X[:, 0], X[:, 1], c='red', s=5)
 axs[1, 1].set_title('IWCNN Prox')
 plt.colorbar(cf3, ax=axs[1, 1])
