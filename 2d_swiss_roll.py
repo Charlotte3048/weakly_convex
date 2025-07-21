@@ -40,7 +40,7 @@ X_noisy = X + noise
 
 
 # Proximal Operator
-def prox_operator(x_init, model, alpha, steps=10, lr=0.1):
+def prox_operator(x_init, model, alpha, steps=20, lr=0.01):
     x = x_init.clone().detach().requires_grad_(True)
     for _ in range(steps):
         energy = ((x - x_init) ** 2).sum(dim=1, keepdim=True) + alpha * model(x)
@@ -49,14 +49,22 @@ def prox_operator(x_init, model, alpha, steps=10, lr=0.1):
     return x
 
 
+def initialize_weights(model, nonlinearity='relu'):
+    for m in model.modules():
+        if isinstance(m, nn.Linear):
+            nn.init.xavier_uniform_(m.weight, gain=nn.init.calculate_gain(nonlinearity))
+            if m.bias is not None:
+                nn.init.zeros_(m.bias)
+
+
 # Training Function with WandB
 def train_with_prox(model, X_clean, X_noisy, alpha=0.1, epochs=100, lr=1e-3, model_name='Model'):
-    wandb.init(project="weakly-convex-regularizer", name=model_name, config={
-        "alpha": alpha,
-        "learning_rate": lr,
-        "epochs": epochs,
-        "model": model_name
-    }, reinit=True)
+    # wandb.init(project="weakly-convex-regularizer", name=model_name, config={
+    #     "alpha": alpha,
+    #     "learning_rate": lr,
+    #     "epochs": epochs,
+    #     "model": model_name
+    # }, reinit=True)
 
     optimizer = optim.Adam(model.parameters(), lr=lr)
     scheduler = CosineAnnealingLR(optimizer, T_max=epochs)  # cosine annealing scheduler
@@ -71,18 +79,24 @@ def train_with_prox(model, X_clean, X_noisy, alpha=0.1, epochs=100, lr=1e-3, mod
         # pred_fake = model(X_noisy)
         # loss_adv = -torch.mean(pred_real) + torch.mean(pred_fake)
 
+        # Gradient regularization
+        # X_noisy.requires_grad_(True)
+        # y_pred = model(X_noisy)
+        # grad = torch.autograd.grad(y_pred.sum(), X_noisy, create_graph=True)[0]
+        # grad_norm = grad.norm(2, dim=1).mean()
+
         # Total loss
-        loss = mse_loss
+        loss = mse_loss # + 0.1 * grad_norm + loss_adv
 
         loss.backward()
         optimizer.step()
-        # scheduler.step()  # Update learning rate
+        scheduler.step()  # Update learning rate
 
-        wandb.log({
-            "epoch": epoch,
-            "total_loss": loss.item(),
-            "mse_loss": mse_loss.item()
-        })
+        # wandb.log({
+        #     "epoch": epoch,
+        #     "total_loss": loss.item(),
+        #     "mse_loss": mse_loss.item()
+        # })
 
         if (epoch + 1) % 10 == 0:
             print(f"Epoch {epoch + 1}, Loss: {loss.item():.6f}")
@@ -90,12 +104,14 @@ def train_with_prox(model, X_clean, X_noisy, alpha=0.1, epochs=100, lr=1e-3, mod
     wandb.finish()
     return model
 
+
 def initialize_weights(module, nonlinearity='relu'):
     for m in module.modules():
         if isinstance(m, nn.Linear):
             nn.init.xavier_uniform_(m.weight, gain=nn.init.calculate_gain(nonlinearity))
             if m.bias is not None:
                 nn.init.zeros_(m.bias)
+
 
 # Define Models
 class NN(nn.Module):
@@ -115,7 +131,6 @@ class NN(nn.Module):
 
     def forward(self, x):
         return self.network(x)
-
 
 
 class ICNN(nn.Module):
@@ -207,9 +222,9 @@ nn_model = NN()
 icnn_model = ICNN()
 iwcnn_model = IWCNN()
 
-reg_model = train_with_prox(nn_model, X, X_noisy, alpha=0.1, epochs=100, lr=1e-2, model_name='NN')
+reg_model = train_with_prox(nn_model, X, X_noisy, alpha=0.2, epochs=100, lr=1e-3, model_name='NN')
 icnn_model = train_with_prox(icnn_model, X, X_noisy, alpha=0.1, epochs=100, lr=1e-2, model_name='ICNN')
-iwcnn_model = train_with_prox(iwcnn_model, X, X_noisy, alpha=0.1, epochs=150, lr=1e-2, model_name='IWCNN')
+iwcnn_model = train_with_prox(iwcnn_model, X, X_noisy, alpha=0.1, epochs=100, lr=1e-2, model_name='IWCNN')
 
 # Visualization
 x_min, x_max = X[:, 0].min() - 1, X[:, 0].max() + 1
