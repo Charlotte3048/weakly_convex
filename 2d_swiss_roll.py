@@ -10,12 +10,12 @@ from sklearn.neighbors import NearestNeighbors
 from torch.optim.lr_scheduler import CosineAnnealingLR
 import torch.nn.functional as F
 
-# 设置种子以保证可重复性
+# Set random seeds for reproducibility
 np.random.seed(42)
 torch.manual_seed(42)
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-# 生成支持批处理的 Swiss Roll 数据
+# Generate batchable Swiss Roll data
 n_samples = 1000
 noise_level = 0.2
 batch_size = 32
@@ -31,21 +31,32 @@ X2_2d = X2_2d @ R.T
 X = np.vstack((X1_2d, X2_2d)).astype(np.float32)
 X = torch.tensor(X).to(device)
 
-# 数据中心化
+# Center the data
 x_coords = X[:, 0]
 x_center = (x_coords.min() + x_coords.max()) / 2
 X[:, 0] += 15
 
-# 添加噪声
+# Add noise
 noise = torch.normal(0, noise_level, X.shape).to(device)
 X_noisy = X + noise
 
-# 创建批次数据集
+# Compute distance from each noisy point to the clean manifold
+nbrs_noise = NearestNeighbors(n_neighbors=1).fit(X.cpu().numpy())
+dists_noise, _ = nbrs_noise.kneighbors(X_noisy.cpu().numpy())
+
+# Identify noise points based on a threshold
+threshold = 0.05
+is_noise = (dists_noise > threshold).astype(np.bool_).reshape(-1)  # [N]
+
+# Log number and ratio of noise points
+noise_indices = np.where(is_noise)[0]
+print(f"Detected noise points: {len(noise_indices)} / {len(X_noisy)} ({len(noise_indices)/len(X_noisy)*100:.2f}%)")
+
+# Create batched dataset
 dataset = torch.utils.data.TensorDataset(X_noisy, X)
 dataloader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=True)
 
-
-# 优化后的近端算子（减少步骤）
+# Proximal operator for training
 def prox_operator(x_init, model, alpha, steps=5, lr=0.05):
     x = x_init.clone().detach().requires_grad_(True).to(device)
     for _ in range(steps):
@@ -54,17 +65,7 @@ def prox_operator(x_init, model, alpha, steps=5, lr=0.05):
         x = x - lr * grad
     return x
 
-
-# 初始化权重
-# def initialize_weights(model, nonlinearity='relu'):
-#     for m in model.modules():
-#         if isinstance(m, nn.Linear):
-#             nn.init.xavier_uniform_(m.weight, gain=nn.init.calculate_gain(nonlinearity))
-#             if m.bias is not None:
-#                 nn.init.zeros_(m.bias)
-
-
-# 支持批处理的训练函数
+# Training loop supporting batches
 def train_with_prox(model, dataloader, alpha=0.1, epochs=100, lr=1e-3, model_name='Model'):
     model = model.to(device)
     optimizer = optim.Adam(model.parameters(), lr=lr)
@@ -89,10 +90,9 @@ def train_with_prox(model, dataloader, alpha=0.1, epochs=100, lr=1e-3, model_nam
 
     return model
 
-
-# 定义模型
+# Simple fully connected regressor
 class NN(nn.Module):
-    def __init__(self, input_dim=2, hidden_dim=128):  # 减少 hidden_dim
+    def __init__(self, input_dim=2, hidden_dim=128):
         super(NN, self).__init__()
         self.network = nn.Sequential(
             nn.Linear(input_dim, hidden_dim),
@@ -105,7 +105,7 @@ class NN(nn.Module):
     def forward(self, x):
         return self.network(x)
 
-
+# Input Convex Neural Network
 class ICNN(nn.Module):
     def __init__(self, input_dim=2, hidden_dim=64):
         super(ICNN, self).__init__()
@@ -115,7 +115,6 @@ class ICNN(nn.Module):
         self.output_layer = nn.Linear(hidden_dim, 1, bias=False).to(device)
         self.output_skip = nn.Linear(input_dim, 1, bias=True).to(device)
         self.activation = nn.ReLU()
-        # self._initialize_weights()
 
     def forward(self, x):
         z = self.activation(self.input_layer(x))
@@ -125,7 +124,7 @@ class ICNN(nn.Module):
         self.output_layer.weight.data.clamp_(min=0)
         return self.output_layer(z) + self.output_skip(x)
 
-
+# IWCNN: Input Weakly Convex Network
 class IWCNN(nn.Module):
     def __init__(self, input_dim=2, hidden_dim=128, lambda_reg=0.2):
         super(IWCNN, self).__init__()
@@ -155,8 +154,7 @@ class IWCNN(nn.Module):
         quad_term = 0.5 * torch.sum(x * self.quadratic.weight * x, dim=1, keepdim=True)
         return convex_out + self.lambda_reg * quad_term
 
-
-# 训练模型
+# Train all models
 nn_model = NN().to(device)
 icnn_model = ICNN().to(device)
 iwcnn_model = IWCNN().to(device)
@@ -165,18 +163,18 @@ nn_model = train_with_prox(nn_model, dataloader, alpha=0.2, epochs=200, lr=5e-4,
 icnn_model = train_with_prox(icnn_model, dataloader, alpha=0.1, epochs=100, lr=1e-3, model_name='ICNN')
 iwcnn_model = train_with_prox(iwcnn_model, dataloader, alpha=0.1, epochs=200, lr=1e-3, model_name='IWCNN')
 
-# 可视化
+# Visualization
 x_min, x_max = X[:, 0].min().item() - 1, X[:, 0].max().item() + 1
 y_min, y_max = X[:, 1].min().item() - 1, X[:, 1].max().item() + 1
 xx, yy = np.meshgrid(np.linspace(-35, 35, 100), np.linspace(y_min, y_max, 100))
 grid = torch.tensor(np.c_[xx.ravel(), yy.ravel()], dtype=torch.float32).to(device)
 
-# 计算真实流形距离
+# Compute true manifold distance for visualization
 nbrs = NearestNeighbors(n_neighbors=1).fit(X.cpu().numpy())
 dists, _ = nbrs.kneighbors(grid.cpu().numpy())
 dist_true = dists.reshape(xx.shape)
 
-# 预测并可视化
+# Evaluate trained models on grid
 nn_model.eval()
 icnn_model.eval()
 iwcnn_model.eval()
@@ -185,6 +183,7 @@ with torch.no_grad():
     icnn_pred = icnn_model(grid).cpu().numpy().reshape(xx.shape)
     iwcnn_pred = iwcnn_model(grid).cpu().numpy().reshape(xx.shape)
 
+# Plot results
 fig, axs = plt.subplots(2, 2, figsize=(16, 10))
 cf0 = axs[0, 0].contourf(xx, yy, gaussian_filter(dist_true, sigma=1), levels=10, cmap='RdBu_r')
 axs[0, 0].scatter(X[:, 0].cpu().numpy(), X[:, 1].cpu().numpy(), c='red', s=5)
