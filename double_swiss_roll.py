@@ -5,22 +5,18 @@ import torch.optim as optim
 from sklearn.datasets import make_swiss_roll
 import matplotlib
 
-matplotlib.use('Agg')  # 使用非交互式后端避免PyCharm兼容性问题
+matplotlib.use('Agg')  # Use non-interactive backend to avoid PyCharm compatibility issues
 import matplotlib.pyplot as plt
 from sklearn.neighbors import kneighbors_graph
 from scipy.sparse.csgraph import shortest_path
 
-# 设置随机种子
+# Set random seeds
 torch.manual_seed(42)
 np.random.seed(42)
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-# Generate batchable Swiss Roll data
-batch_size = 32
 
 class StandardNN(nn.Module):
-    """标准神经网络"""
+    """Standard Neural Network"""
 
     def __init__(self, input_dim=2, hidden_dim=128):
         super().__init__()
@@ -39,43 +35,43 @@ class StandardNN(nn.Module):
 
 
 class ICNN(nn.Module):
-    """输入凸神经网络 (Input Convex Neural Network)"""
+    """Input Convex Neural Network"""
 
     def __init__(self, input_dim=2, hidden_dim=64):
         super().__init__()
         self.input_dim = input_dim
         self.hidden_dim = hidden_dim
 
-        # 第一层：正常的线性层
+        # First layer: normal linear layer
         self.first_layer = nn.Linear(input_dim, hidden_dim)
 
-        # 中间层：权重必须为非负
+        # Hidden layers: weights must be non-negative
         self.hidden_layers = nn.ModuleList([
             nn.Linear(hidden_dim, hidden_dim) for _ in range(2)
         ])
 
-        # 跳跃连接层（从输入直接到每个隐藏层）
+        # Skip connection layers (from input directly to each hidden layer)
         self.skip_layers = nn.ModuleList([
             nn.Linear(input_dim, hidden_dim) for _ in range(2)
         ])
 
-        # 输出层
+        # Output layer
         self.output_layer = nn.Linear(hidden_dim, 1)
         self.output_skip = nn.Linear(input_dim, 1)
 
     def forward(self, x):
-        # 第一层
+        # First layer
         h = torch.relu(self.first_layer(x))
 
-        # 中间层（确保权重非负）
+        # Hidden layers (ensure weights are non-negative)
         for i, (hidden_layer, skip_layer) in enumerate(zip(self.hidden_layers, self.skip_layers)):
-            # 确保隐藏层权重非负
+            # Ensure hidden layer weights are non-negative
             with torch.no_grad():
                 hidden_layer.weight.data = torch.clamp(hidden_layer.weight.data, min=0)
 
             h = torch.relu(hidden_layer(h) + skip_layer(x))
 
-        # 输出层（确保权重非负）
+        # Output layer (ensure weights are non-negative)
         with torch.no_grad():
             self.output_layer.weight.data = torch.clamp(self.output_layer.weight.data, min=0)
 
@@ -83,7 +79,7 @@ class ICNN(nn.Module):
 
 
 class IWCNN(nn.Module):
-    """输入弱凸神经网络 (Input Weakly Convex Neural Network)"""
+    """Input Weakly Convex Neural Network"""
 
     def __init__(self, input_dim=2, hidden_dim=128, lambda_reg=0.1):
         super().__init__()
@@ -99,10 +95,10 @@ class IWCNN(nn.Module):
             nn.Linear(hidden_dim, 1)
         )
 
-        # 用于计算弱凸性正则化的二次项
+        # Quadratic term for computing weak convexity regularization
         self.quadratic = nn.Linear(input_dim, 1, bias=False)
         with torch.no_grad():
-            # 初始化为对角矩阵的权重
+            # Initialize as diagonal matrix weights
             self.quadratic.weight.data = torch.ones(1, input_dim) * 0.1
 
     def forward(self, x):
@@ -111,55 +107,102 @@ class IWCNN(nn.Module):
         return network_out + self.lambda_reg * quadratic_out
 
 
-def generate_swiss_roll_data():
-    """生成双螺旋瑞士卷数据"""
-
-    n_samples = 1000
+def generate_double_spiral_data():
+    """Generate double spiral data while preserving spiral structure"""
+    n_samples_per_swiss_roll = 500
     noise_level = 0.1
 
-    # 生成第一个瑞士卷
-    X1, _ = make_swiss_roll(n_samples // 2, noise=0, random_state=42)
-    X1_2d = X1[:, [0, 2]]
+    # Generate first spiral
+    t1 = np.random.uniform(1.5 * np.pi, 4.5 * np.pi, n_samples_per_swiss_roll)
+    height1 = np.random.uniform(0, 20, n_samples_per_swiss_roll)
 
-    # 生成第二个瑞士卷
-    X2, _ = make_swiss_roll(n_samples // 2, noise=0, random_state=42)
-    X2_2d = X2[:, [0, 2]]
+    # 3D coordinates for first swiss roll
+    x1 = t1 * np.cos(t1)
+    y1 = height1
+    z1 = t1 * np.sin(t1)
 
-    # 变换第二个螺旋
-    X2_2d[:, 0] = -X2_2d[:, 0]
-    X2_2d[:, 0] += 45
+    # Take x and z coordinates as 2D projection
+    X1_2d = np.column_stack([x1, z1])
 
+    # Generate second swiss roll
+    t2 = np.random.uniform(1.5 * np.pi, 4.5 * np.pi, n_samples_per_swiss_roll)
+    height2 = np.random.uniform(0, 20, n_samples_per_swiss_roll)
+
+    # 3D coordinates for second spiral
+    x2 = t2 * np.cos(t2)
+    y2 = height2
+    z2 = t2 * np.sin(t2)
+
+    # Transform second spiral
+    X2_2d = np.column_stack([x2, z2])
+    X2_2d[:, 0] = -X2_2d[:, 0]  # Mirror along x-axis
+    X2_2d[:, 0] += 45  # Translate
+
+    # Rotate second spiral
     angle = np.pi
     rotation_matrix = np.array([[np.cos(angle), -np.sin(angle)],
                                 [np.sin(angle), np.cos(angle)]])
     X2_2d = X2_2d @ rotation_matrix.T
 
-    # 合并数据
-    X = np.vstack((X1_2d, X2_2d))
-    # 数据中心化
-    x_coords = X[:, 0]
-    x_center = (x_coords.min() + x_coords.max()) / 2
-    X[:, 0] -= x_center
+    # Combine both spirals
+    X_2d = np.vstack([X1_2d, X2_2d])
+    t_combined = np.concatenate([t1, t2])
+    spiral_labels = np.concatenate([np.zeros(n_samples_per_swiss_roll), np.ones(n_samples_per_swiss_roll)])
 
-    # 添加噪声
-    noise = np.random.normal(0, noise_level, X.shape)
-    X_noisy = X + noise
+    # Center the data
+    x_center = (X_2d[:, 0].min() + X_2d[:, 0].max()) / 2
+    X_2d[:, 0] -= x_center
 
-    return torch.tensor(X_noisy, dtype=torch.float32), torch.tensor(X, dtype=torch.float32)
+    # Scale the data
+    X_2d = X_2d * 0.3
+
+    # Add noise
+    noise = np.random.normal(0, noise_level, X_2d.shape)
+    X_noisy = X_2d + noise
+
+    # Find spiral starting points (points with minimum t values for each spiral)
+    spiral1_mask = spiral_labels == 0
+    spiral2_mask = spiral_labels == 1
+
+    spiral1_start_idx = np.where(spiral1_mask)[0][np.argmin(t1)]
+    spiral2_start_idx = np.where(spiral2_mask)[0][np.argmin(t2)]
+
+    return (torch.tensor(X_noisy, dtype=torch.float32),
+            torch.tensor(X_2d, dtype=torch.float32),
+            t_combined, spiral_labels,
+            spiral1_start_idx, spiral2_start_idx)
+
+
+def compute_dual_reference_distances(X_clean, ref_idx1, ref_idx2):
+    """
+    Compute distances from dual reference points
+    """
+
+    X_np = X_clean.numpy()
+
+    # Compute geodesic distances from both reference points
+    manifold_distances = compute_manifold_distances(X_np)
+
+    distances1 = manifold_distances[ref_idx1]
+    distances2 = manifold_distances[ref_idx2]
+
+    combined_distances = np.minimum(distances1, distances2)  # minimum distance to either reference point
+
+    return combined_distances
 
 
 def compute_manifold_distances(X_clean):
-    """计算流形上的测地距离（使用k近邻图近似）"""
+    """Compute geodesic distances on manifold (using k-nearest neighbor graph approximation)"""
     from sklearn.neighbors import NearestNeighbors
     from scipy.sparse.csgraph import shortest_path
     from scipy.sparse import csr_matrix
 
-    # 构建k近邻图
-    k = 15  # 增加邻居数量以确保连通性
+    # Build k-nearest neighbor graph
+    k = 15  # Increase number of neighbors to ensure connectivity
     nbrs = NearestNeighbors(n_neighbors=k).fit(X_clean)
     distances, indices = nbrs.kneighbors(X_clean)
 
-    # 构建对称的稀疏距离矩阵
+    # Build symmetric sparse distance matrix
     n = X_clean.shape[0]
     row_ind = []
     col_ind = []
@@ -170,84 +213,74 @@ def compute_manifold_distances(X_clean):
             neighbor_idx = indices[i, j]
             dist = distances[i, j]
 
-            # 添加双向边
+            # Add bidirectional edges
             row_ind.extend([i, neighbor_idx])
             col_ind.extend([neighbor_idx, i])
             data.extend([dist, dist])
 
     distance_matrix = csr_matrix((data, (row_ind, col_ind)), shape=(n, n))
 
-    # 计算最短路径（测地距离）
+    # Compute shortest paths (geodesic distances)
     geodesic_distances = shortest_path(distance_matrix, directed=False)
 
-    # 处理无穷大值
+    # Handle infinite values
     geodesic_distances[np.isinf(geodesic_distances)] = geodesic_distances[np.isfinite(geodesic_distances)].max() * 2
 
     return geodesic_distances
 
 
-def train_distance_function(model, X_data, X_clean, epochs=1000, lr=0.001):
+def train_distance_function(model, X_data, X_clean, spiral1_start, spiral2_start,
+                            epochs=1000, lr=0.001):
     optimizer = optim.Adam(model.parameters(), lr=lr)
 
-    print("Computing manifold distances...")
-    manifold_distances = compute_manifold_distances(X_clean.numpy())
-    center_idx = np.argmin(np.sum((X_clean.numpy() - X_clean.numpy().mean(axis=0)) ** 2, axis=1))
-    target_distances = torch.tensor(manifold_distances[center_idx], dtype=torch.float32).unsqueeze(1)
+    # Get combined distances from both reference points
+    combined_distances = compute_dual_reference_distances(
+        X_clean, spiral1_start, spiral2_start
+    )
 
-    max_dist = target_distances.max()
-    if max_dist > 0 and torch.isfinite(max_dist):
-        target_distances = target_distances / max_dist
-    else:
-        center_point = X_clean[center_idx:center_idx + 1]
-        target_distances = torch.norm(X_data - center_point, dim=1, keepdim=True)
-        target_distances = target_distances / target_distances.max()
+    target_distances = torch.tensor(combined_distances, dtype=torch.float32).unsqueeze(1)
+    target_distances = target_distances / target_distances.max()
 
     model.train()
+
     for epoch in range(epochs):
         optimizer.zero_grad()
 
         pred_distances = model(X_data)
         loss_mse = nn.MSELoss()(pred_distances, target_distances)
 
-        # 对称性损失：沿 x=0 轴镜像
-        # X_mirrored = X_data.clone()
-        # X_mirrored[:, 0] = -X_mirrored[:, 0]  # 沿 x=0 镜像
-        # pred_distances_mirrored = model(X_mirrored)
-        # symmetry_loss = torch.mean((pred_distances - pred_distances_mirrored) ** 2)
-
-        # 总损失
-        total_loss = loss_mse #+ 0.005 * symmetry_loss  # 0.01 为对称性损失权重，可调整
+        total_loss = loss_mse
 
         total_loss.backward()
         optimizer.step()
 
-        if epoch % 200 == 0 or epoch == epochs - 1:
+        if epoch % 100 == 0 or epoch == epochs - 1:
             print(f"Epoch {epoch}, MSE Loss: {loss_mse.item():.4f}")
 
     return model
 
 
-def plot_neural_network_contour(model, X_data, title, xlim=(-30, 30), ylim=(-30, 30)):
-    """创建等高线图（专门用于子图）"""
+def plot_neural_network_contour(model, X_data, title, xlim=(-20, 20), ylim=(-15, 15)):
+    """Create contour plot (specifically for subplots)"""
     model.eval()
 
-    # 创建网格
+    # Create grid
     x_range = np.linspace(xlim[0], xlim[1], 100)
     y_range = np.linspace(ylim[0], ylim[1], 100)
     xx, yy = np.meshgrid(x_range, y_range)
 
-    # 计算网格点的距离函数值
+    # Compute distance function values for grid points
     grid_points = torch.tensor(np.column_stack([xx.ravel(), yy.ravel()]), dtype=torch.float32)
 
     with torch.no_grad():
         z_values = model(grid_points).numpy().reshape(xx.shape)
 
-    # 绘制等高线
+    # Draw contour lines
     levels = np.linspace(z_values.min(), z_values.max(), 15)
     plt.contourf(xx, yy, z_values, levels=levels, cmap='RdBu_r', alpha=0.8)
     plt.contour(xx, yy, z_values, levels=levels, colors='white', alpha=0.3, linewidths=0.5)
 
-    # 绘制数据点
+    # Draw data points
     X_np = X_data.numpy()
     plt.scatter(X_np[:, 0], X_np[:, 1], c='darkblue', s=20, alpha=0.8, edgecolors='white', linewidth=0.5)
 
@@ -265,27 +298,27 @@ def compute_geodesic_distance(grid_points, manifold_points, n_neighbors=15):
     return np.min(distances, axis=1).reshape(-1)
 
 
-def plot_true_manifold_distance(X_data, X_clean, title, xlim=(-20, 40), ylim=(-30, 30), resolution=100):
-    """使用图距离绘制真实 manifold 距离图，改进为 geodesic-based True 面板"""
+def plot_true_manifold_distance(X_data, X_clean, title, xlim=(-20, 20), ylim=(-15, 15), resolution=100):
+    """Draw true manifold distance map using dual reference points"""
     from scipy.ndimage import gaussian_filter
 
-    # 创建网格点
+    # Create grid points
     x_range = np.linspace(xlim[0], xlim[1], resolution)
     y_range = np.linspace(ylim[0], ylim[1], resolution)
     xx, yy = np.meshgrid(x_range, y_range)
     grid_points = np.column_stack([xx.ravel(), yy.ravel()])
 
-    # 使用 geodesic 距离计算每个 grid 点到流形的最短图距离
+    # Use geodesic distance to compute shortest graph distance from each grid point to manifold
     geodesic_dists = compute_geodesic_distance(grid_points, X_clean.numpy(), n_neighbors=10)
     z = geodesic_dists.reshape(resolution, resolution)
     z = gaussian_filter(z, sigma=1.0)
 
-    # 绘图
+    # Plot
     levels = np.linspace(np.nanmin(z), np.nanmax(z), 15)
     plt.contourf(xx, yy, z, levels=levels, cmap='RdBu_r', alpha=0.7)
     plt.contour(xx, yy, z, levels=levels, colors='white', alpha=0.3, linewidths=0.5)
 
-    # 原始点可视化
+    # Visualize original points
     X_np = X_data.numpy()
     plt.scatter(X_np[:, 0], X_np[:, 1], c='darkblue', s=12, alpha=0.8,
                 edgecolors='white', linewidth=0.3)
@@ -295,75 +328,65 @@ def plot_true_manifold_distance(X_data, X_clean, title, xlim=(-20, 40), ylim=(-3
 
 
 def main():
-    """主函数：复现Figure 1"""
-    # 生成数据
-    print("Generating Swiss roll data...")
-    X_noisy, X_clean = generate_swiss_roll_data()
+    # Generate data
+    print("Generating double spiral data...")
+    X_noisy, X_clean, t_params, spiral_labels, spiral1_start, spiral2_start = generate_double_spiral_data()
 
-    # 计算真实的流形距离（用于True面板）
+    print(f"Spiral 1 start index: {spiral1_start}")
+    print(f"Spiral 2 start index: {spiral2_start}")
+
+    # Compute true manifold distances for visualization
     print("Computing true manifold distances...")
-    manifold_distances = compute_manifold_distances(X_clean.numpy())
-    center_idx = np.argmin(np.sum((X_clean.numpy() - X_clean.numpy().mean(axis=0)) ** 2, axis=1))
-    true_distances = manifold_distances[center_idx]
+    combined_distances = compute_dual_reference_distances(
+        X_clean, spiral1_start, spiral2_start)
 
-    # 安全归一化
-    max_dist = np.max(true_distances[np.isfinite(true_distances)])
-    if max_dist > 0:
-        true_distances = true_distances / max_dist
-    else:
-        # 备选方案：使用欧几里得距离
-        center_point = X_clean.numpy()[center_idx]
-        true_distances = np.linalg.norm(X_clean.numpy() - center_point, axis=1)
-        true_distances = true_distances / true_distances.max()
-
-    # 初始化模型
+    # Initialize models
     models = {
         'NN': StandardNN(),
         'ICNN': ICNN(),
         'IWCNN': IWCNN()
     }
 
-    # 训练模型
+    # Train models with dual reference points
     trained_models = {}
     for name, model in models.items():
         print(f"\nTraining {name}...")
-        trained_models[name] = train_distance_function(model, X_noisy, X_clean)
+        trained_models[name] = train_distance_function(
+            model, X_noisy, X_clean, spiral1_start, spiral2_start,
+        )
 
-    # 创建图形
+    # Create figure
     fig, axes = plt.subplots(2, 2, figsize=(15, 12))
-    fig.suptitle('Distance Function Approximation Comparison', fontsize=16, fontweight='bold')
+    fig.suptitle(f'Double Swiss Roll Distance Function)',
+                 fontsize=16, fontweight='bold')
 
-    # 计算统一的xlim和ylim
+    # Compute unified xlim and ylim
     X_np = X_noisy.numpy()
-    xlim = (X_np[:, 0].min() - 5, X_np[:, 0].max() + 5)
-    ylim = (X_np[:, 1].min() - 5, X_np[:, 1].max() + 5)
+    margin = 3
+    xlim = (X_np[:, 0].min() - margin, X_np[:, 0].max() + margin)
+    ylim = (X_np[:, 1].min() - margin, X_np[:, 1].max() + margin)
 
-    # True距离（左上）
+    # True distance (top left)
     plt.subplot(2, 2, 1)
-    plot_true_manifold_distance(X_noisy, X_clean, 'True', xlim, ylim)
+    plot_true_manifold_distance(X_noisy, X_clean, 'True',
+                                xlim, ylim)
 
-    # NN approximation（右上）
+    # NN approximation (top right)
     plt.subplot(2, 2, 2)
     plot_neural_network_contour(trained_models['NN'], X_noisy, 'NN approximation', xlim, ylim)
 
-    # ICNN approximation（左下）
+    # ICNN approximation (bottom left)
     plt.subplot(2, 2, 3)
     plot_neural_network_contour(trained_models['ICNN'], X_noisy, 'ICNN approximation', xlim, ylim)
 
-    # IWCNN approximation（右下）
+    # IWCNN approximation (bottom right)
     plt.subplot(2, 2, 4)
     plot_neural_network_contour(trained_models['IWCNN'], X_noisy, 'IWCNN approximation', xlim, ylim)
 
     plt.tight_layout()
 
-    plt.savefig('double_swiss_roll_distance_comparison.png', dpi=300, bbox_inches='tight')
-    print("Plot saved as 'double_swiss_roll_distance_comparison.png'")
-
-    print("\nTraining completed! The plots show the comparison between different neural network architectures:")
-    print("- True: Ground truth manifold distance")
-    print("- NN: Standard neural network approximation")
-    print("- ICNN: Input Convex Neural Network approximation")
-    print("- IWCNN: Input Weakly Convex Neural Network approximation")
+    plt.savefig(f'double_swiss_roll_distance_comparison.png', dpi=300, bbox_inches='tight')
+    print(f"Plot saved as 'double_swiss_roll_distance_comparison.png'")
 
 
 if __name__ == "__main__":
