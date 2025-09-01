@@ -529,8 +529,8 @@ def main():
             plot_neural_network_contour(trained_models[model_key], X_noisy, title, xlim, ylim)
 
     plt.tight_layout()
-    plt.savefig('double_spiral_iwcnn_comparison.png', dpi=300, bbox_inches='tight')
-    print("Comparison plot saved as 'double_spiral_iwcnn_comparison.png'")
+    plt.savefig('Cambridge_double_swiss_roll_result.png', dpi=300, bbox_inches='tight')
+    print("Comparison plot saved as 'Cambridge_double_swiss_roll_result.png'")
 
 
 

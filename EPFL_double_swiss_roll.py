@@ -259,7 +259,7 @@ def visualize_wcrr(model, X_noisy, X_clean, grid_size=101):
     return xx, yy, dists_true, dists_model
 
 
-def visualize_all(*, X_noisy, X_clean, dd_true, dd_nn, dd_icnn, dd_wcrr, xx, yy, save_path="Figure1_compare.png"):
+def visualize_all(*, X_noisy, X_clean, dd_true, dd_nn, dd_icnn, dd_wcrr, xx, yy, save_path="EPFL_swiss_roll_result.png"):
     fig, axes = plt.subplots(2, 2, figsize=(12, 10), constrained_layout=True)
     axes = axes.flatten()  # 展平为一维数组
 
@@ -380,6 +380,6 @@ if __name__ == "__main__":
     visualize_all(
         X_noisy=X_noisy, X_clean=X_clean,
         dd_true=dd_true, dd_nn=dd_nn, dd_icnn=dd_icnn, dd_wcrr=dd_wcrr,
-        xx=xx, yy=yy, save_path="Figure1_compare.png"
+        xx=xx, yy=yy, save_path="EPFL_swiss_roll_result.png"
     )
 
